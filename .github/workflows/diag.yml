@@ -39,12 +39,14 @@ jobs:
       - name: Start xpra (daemon=no, backgrounded) + audio both directions
         run: |
           sudo apt-get install -y iproute2 >/dev/null 2>&1 || true
-          echo "===== listeners BEFORE xpra ====="
-          ss -ltnp 2>/dev/null | grep -E ':14500' || echo "14500 free"
+          echo "===== WHO holds 14500 (default xpra port) ====="
+          sudo ss -ltnp 2>/dev/null | grep -E ':14500' || echo "14500 free"
+          echo "===== is 41234 free? ====="
+          sudo ss -ltnp 2>/dev/null | grep -E ':41234' || echo "41234 free"
 
-          # background instead of --daemon=yes (avoids the double-bind in xpra 6.5)
+          # bind our session to a NON-default port to avoid the system xpra on 14500
           xpra start :100 \
-            --bind-tcp=0.0.0.0:14500 \
+            --bind-tcp=0.0.0.0:41234 \
             --html=on \
             --daemon=no \
             --exit-with-children=no \
@@ -70,12 +72,14 @@ jobs:
 
           # wait for HTML5 server to answer
           for i in $(seq 1 30); do
-            curl -s -o /dev/null http://localhost:14500 && { echo "HTML5 up after ${i}x2s"; break; }
+            curl -s -o /dev/null http://localhost:41234 && { echo "HTML5 up after ${i}x2s"; break; }
             sleep 2
           done
 
-          echo "===== listeners AFTER xpra ====="
-          ss -ltnp 2>/dev/null | grep -E ':14500' || echo "nothing on 14500"
+          echo "===== listeners AFTER xpra (41234) ====="
+          sudo ss -ltnp 2>/dev/null | grep -E ':41234' || echo "nothing on 41234"
+          echo "===== curl code ====="
+          curl -s -o /dev/null -w "http_code=%{http_code}\n" http://localhost:41234 || true
 
       - name: Collect diagnostics (after)
         if: always()
@@ -104,7 +108,9 @@ jobs:
             cat "$f" >> server_logs.txt
           done
           echo "===== speaker/mic in xpra info =====" >> server_logs.txt
-          xpra info :100 2>/dev/null | grep -Ei 'speaker|microphone|sound|audio' | head -40 >> server_logs.txt || true
+          xpra info :100 2>/dev/null | grep -Ei 'speaker|microphone|sound|audio|clipboard' | head -60 >> server_logs.txt || true
+          echo "===== chrome running? =====" >> server_logs.txt
+          ps aux | grep -Ei 'chrome' | grep -v grep | head -5 >> server_logs.txt || true
           cat server_logs.txt || true
 
       - name: Upload diagnostics
