@@ -1,0 +1,95 @@
+name: DIAG xpra
+on:
+  workflow_dispatch:
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install
+        run: |
+          sudo wget -q -O /usr/share/keyrings/xpra.asc https://xpra.org/xpra.asc
+          sudo wget -q -O /etc/apt/sources.list.d/xpra.sources \
+            https://raw.githubusercontent.com/Xpra-org/xpra/master/packaging/repos/noble/xpra.sources
+          sudo apt-get update
+          sudo apt-get install -y \
+            xpra xpra-x11 xpra-html5 xpra-audio-server xpra-codecs \
+            pulseaudio pulseaudio-utils dbus-x11 \
+            gstreamer1.0-pulseaudio gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly gstreamer1.0-tools \
+            fonts-noto-core fonts-noto-color-emoji fonts-liberation culmus \
+            x11-xkb-utils pcmanfm gpicview evince mousepad file-roller \
+            unzip p7zip-full xdg-utils shared-mime-info desktop-file-utils locales \
+            iproute2 2>&1 | tail -n 6
+          sudo locale-gen he_IL.UTF-8 || true
+
+      - name: Configure Chrome
+        run: |
+          mkdir -p "$HOME/Downloads" "$HOME/.config/google-chrome/Default"
+          printf '%s' '{"intl":{"accept_languages":"he,he-IL,en-US,en"},"translate":{"enabled":true},"translate_allowlists":{"en":"he"},"translate_blocked_languages":["he","iw"],"download":{"default_directory":"/home/runner/Downloads","prompt_for_download":false}}' \
+            > "$HOME/.config/google-chrome/Default/Preferences"
+          sudo mkdir -p /etc/opt/chrome/policies/managed
+          printf '%s' '{"ForcedLanguages":["he","he-IL","en-US","en"],"TranslateEnabled":true}' \
+            | sudo tee /etc/opt/chrome/policies/managed/hebrew.json >/dev/null
+          xdg-mime default pcmanfm.desktop inode/directory 2>/dev/null || true
+          xdg-mime default org.gnome.Evince.desktop application/pdf 2>/dev/null || true
+          echo "pdf handler: $(xdg-mime query default application/pdf 2>/dev/null)"
+
+      - name: Start xpra (daemon=no) with ALL new options
+        run: |
+          export LANG=he_IL.UTF-8
+          export LANGUAGE=he:he_IL:en
+          export LC_MESSAGES=he_IL.UTF-8
+          mkdir -p "$HOME/Downloads"
+          xpra start :100 \
+            --bind-tcp=0.0.0.0:41234 --html=on --daemon=no --exit-with-children=no \
+            --resize-display=1280x720 \
+            --pulseaudio=yes --speaker=yes --speaker-codec=mp3 --microphone=no \
+            --clipboard=yes --clipboard-direction=both \
+            --file-transfer=yes --open-files=yes --open-url=yes \
+            --keyboard-sync=no \
+            --webcam=no --mdns=no --notifications=yes --bell=no \
+            --quality=50 --min-quality=20 \
+            --start="pcmanfm /home/runner/Downloads" \
+            --start-child="google-chrome --lang=he --no-sandbox --disable-dev-shm-usage \
+              --disable-session-crashed-bubble --disable-sync --disable-background-networking \
+              --disable-component-update --disable-features=BackForwardCache --no-first-run \
+              --no-default-browser-check --autoplay-policy=no-user-gesture-required \
+              --renderer-process-limit=4 --window-size=1280,720" \
+            > xpra_stdout.txt 2>&1 &
+          echo "bg pid=$!"
+          for i in $(seq 1 40); do
+            curl -s -o /dev/null http://localhost:41234 && { echo "HTML5 up (${i})"; break; }
+            sleep 2
+          done
+          sleep 8
+
+      - name: Collect
+        if: always()
+        run: |
+          {
+            echo "== curl =="; curl -s -o /dev/null -w "http_code=%{http_code}\n" http://localhost:41234 || echo curl-fail
+            echo "== 41234 =="; sudo ss -ltnp 2>/dev/null | grep 41234 || echo "nothing on 41234"
+            echo "== screen size =="; DISPLAY=:100 xdpyinfo 2>/dev/null | grep -i 'dimensions' || true
+            echo "== procs =="; ps aux | grep -Ei 'xpra|chrome|pcmanfm' | grep -v grep | wc -l
+            echo "chrome? $(pgrep -a chrome | head -1)"
+            echo "pcmanfm? $(pgrep -a pcmanfm | head -1)"
+            echo "== xpra info =="; xpra info :100 2>/dev/null | grep -Ei 'file-transfer|open-files|open-url|speaker|clipboard.can|audio.initialized|keyboard.sync' | head -30
+          } > diag.txt 2>&1
+          cat diag.txt
+          echo "== ERRORS in xpra_stdout ==" > logs.txt
+          grep -Ei 'error|invalid|unknown option|not a valid|no such|cannot|fail' xpra_stdout.txt | grep -viE 'crashpad|UPower|xkbcomp|GLib-GIO|pactl|no drm|XKB bindings' | head -40 >> logs.txt || true
+          echo "--- tail stdout ---" >> logs.txt
+          tail -n 25 xpra_stdout.txt >> logs.txt
+          cat logs.txt
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diag
+          path: |
+            diag.txt
+            logs.txt
+          retention-days: 1
+          if-no-files-found: warn
