@@ -11,7 +11,9 @@ jobs:
     steps:
       # Xpra from the official repo (v6.x) — the Ubuntu-repo version is too old
       # and its HTML5 client has broken clipboard support and poor audio.
-      - name: Install Xpra 6 + audio stack
+      # Extra packages: x11-xkb-utils (Hebrew keymap), pcmanfm (file manager),
+      # xdg-utils (so "show in folder"/open works), locales (Hebrew locale).
+      - name: Install Xpra 6 + audio + Hebrew + file tools
         run: |
           sudo wget -q -O /usr/share/keyrings/xpra.asc https://xpra.org/xpra.asc
           sudo wget -q -O /etc/apt/sources.list.d/xpra.sources \
@@ -23,12 +25,26 @@ jobs:
             gstreamer1.0-pulseaudio gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly \
             gstreamer1.0-tools \
-            fonts-noto-core fonts-noto-color-emoji fonts-liberation culmus
+            fonts-noto-core fonts-noto-color-emoji fonts-liberation culmus \
+            x11-xkb-utils pcmanfm xdg-utils locales
+          sudo locale-gen he_IL.UTF-8 || true
 
       - name: Install Cloudflared
         run: |
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb
+
+      # Chrome profile: Hebrew UI language, Hebrew as top accept-language (so
+      # Chrome offers to translate non-Hebrew pages to Hebrew), and a fixed
+      # download directory with no "save as" prompt.
+      - name: Configure Chrome (Hebrew + translate + downloads)
+        run: |
+          mkdir -p "$HOME/Downloads"
+          mkdir -p "$HOME/.config/google-chrome/Default"
+          printf '%s' '{"intl":{"accept_languages":"he,he-IL,en-US,en","selected_languages":"he,he-IL,en-US,en"},"translate":{"enabled":true},"browser":{"has_seen_welcome_page":true},"download":{"default_directory":"/home/runner/Downloads","prompt_for_download":false,"directory_upgrade":true}}' \
+            > "$HOME/.config/google-chrome/Default/Preferences"
+          # make pcmanfm the default handler for folders so Chrome "show in folder" works
+          xdg-mime default pcmanfm.desktop inode/directory 2>/dev/null || true
 
       # NOTE: xpra's default port 14500 is already taken on the runner by a
       # systemd-activated xpra.socket, so binding it fails ("Address already in
@@ -37,8 +53,17 @@ jobs:
       # Google Chrome is preinstalled on the runner. The apt "chromium-browser"
       # package is a snap, and snap confinement breaks the PulseAudio connection
       # under xpra (= no sound), so we use Chrome instead.
+      #
+      # file-transfer/open-files/open-url = on  -> the html5 client's Server menu
+      # can send files to your computer and receive uploads. pcmanfm is launched
+      # via --start (not start-child, so closing it doesn't end the session) to
+      # give a real file manager for the Downloads folder.
       - name: Start Xpra
         run: |
+          export LANG=he_IL.UTF-8
+          export LANGUAGE=he_IL:he
+          mkdir -p "$HOME/Downloads"
+
           xpra start :100 \
             --bind-tcp=0.0.0.0:41234 \
             --html=on \
@@ -50,22 +75,26 @@ jobs:
             --microphone=no \
             --clipboard=yes \
             --clipboard-direction=both \
+            --file-transfer=yes \
+            --open-files=yes \
+            --open-url=yes \
             --webcam=no \
             --mdns=no \
-            --notifications=no \
+            --notifications=yes \
             --bell=no \
             --quality=50 \
             --min-quality=20 \
+            --start="pcmanfm /home/runner/Downloads" \
             --start-child="google-chrome \
+              --lang=he \
               --no-sandbox \
               --disable-dev-shm-usage \
-              --disable-extensions \
               --disable-sync \
               --disable-background-networking \
               --disable-background-timer-throttling \
               --disable-renderer-backgrounding \
               --disable-component-update \
-              --disable-features=Translate,BackForwardCache \
+              --disable-features=BackForwardCache \
               --no-first-run \
               --no-default-browser-check \
               --autoplay-policy=no-user-gesture-required \
@@ -77,6 +106,9 @@ jobs:
             curl -s -o /dev/null http://localhost:41234 && break
             sleep 2
           done
+
+          # Hebrew keyboard layout with Alt+Shift toggle (English <-> Hebrew)
+          DISPLAY=:100 setxkbmap -layout "us,il" -option "grp:alt_shift_toggle" 2>/dev/null || true
           echo "Xpra is up."
 
       - name: Start Cloudflare Tunnel
@@ -100,12 +132,11 @@ jobs:
           fi
 
           # שמע חד-כיווני בלבד: הרמקול (שרת->דפדפן) עובד. מיקרופון (דפדפן->שרת)
-          # לא נתמך בלקוח ה-HTML5 של xpra - אין בו קוד ללכידת מיקרופון. לוח טקסט
-          # עובד לשני הכיוונים (העתקת תמונות לא נתמכת בדפדפן).
+          # לא נתמך בלקוח ה-HTML5 של xpra. לוח טקסט עובד לשני הכיוונים.
           FULL="${URL}/?sound=on&audio_codec=mp3&clipboard=on"
 
           echo "=============================================================="
-          echo " OPEN THIS URL (speaker audio + clipboard):"
+          echo " OPEN THIS URL (speaker audio + clipboard + Hebrew):"
           echo " ${FULL}"
           echo "=============================================================="
 
