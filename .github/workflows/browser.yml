@@ -9,10 +9,14 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      # Xpra from the official repo (v6.x) — the Ubuntu-repo version is too old
-      # and its HTML5 client has broken clipboard support and poor audio.
-      # Extra packages: x11-xkb-utils (Hebrew keymap), pcmanfm (file manager),
-      # xdg-utils (so "show in folder"/open works), locales (Hebrew locale).
+      # Xpra 6 from the official repo (the Ubuntu-repo build is too old).
+      # Extra packages:
+      #  - x11-xkb-utils: keymap tools
+      #  - pcmanfm + gpicview: file manager + image viewer (LXDE, lightweight)
+      #  - evince (PDF), mousepad (text), file-roller+unzip+p7zip (archives):
+      #    so downloaded files can actually be OPENED on the server
+      #  - shared-mime-info, desktop-file-utils: MIME/handler database
+      #  - culmus + noto: Hebrew fonts
       - name: Install Xpra 6 + audio + Hebrew + file tools
         run: |
           sudo wget -q -O /usr/share/keyrings/xpra.asc https://xpra.org/xpra.asc
@@ -26,42 +30,46 @@ jobs:
             gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly \
             gstreamer1.0-tools \
             fonts-noto-core fonts-noto-color-emoji fonts-liberation culmus \
-            x11-xkb-utils pcmanfm xdg-utils locales
+            x11-xkb-utils pcmanfm gpicview evince mousepad file-roller \
+            unzip p7zip-full xdg-utils shared-mime-info desktop-file-utils locales
           sudo locale-gen he_IL.UTF-8 || true
+          sudo update-mime-database /usr/share/mime 2>/dev/null || true
+          sudo update-desktop-database 2>/dev/null || true
 
       - name: Install Cloudflared
         run: |
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb
 
-      # Chrome profile: Hebrew UI language, Hebrew as top accept-language (so
-      # Chrome offers to translate non-Hebrew pages to Hebrew), and a fixed
-      # download directory with no "save as" prompt.
-      - name: Configure Chrome (Hebrew + translate + downloads)
+      # Chrome: Hebrew UI + AUTOMATIC translate of non-Hebrew pages -> Hebrew.
+      # translate_allowlists forces no-prompt translation (English is in
+      # accept_languages so Chrome would otherwise treat it as "known" and never
+      # offer translation). A managed policy locks the language order + translate.
+      - name: Configure Chrome (Hebrew UI + auto-translate + downloads)
         run: |
-          mkdir -p "$HOME/Downloads"
-          mkdir -p "$HOME/.config/google-chrome/Default"
-          printf '%s' '{"intl":{"accept_languages":"he,he-IL,en-US,en","selected_languages":"he,he-IL,en-US,en"},"translate":{"enabled":true},"browser":{"has_seen_welcome_page":true},"download":{"default_directory":"/home/runner/Downloads","prompt_for_download":false,"directory_upgrade":true}}' \
+          mkdir -p "$HOME/Downloads" "$HOME/.config/google-chrome/Default"
+          printf '%s' '{"intl":{"accept_languages":"he,he-IL,en-US,en","selected_languages":"he,he-IL,en-US,en"},"translate":{"enabled":true},"translate_recent_target":"he","translate_allowlists":{"en":"he","fr":"he","ar":"he","ru":"he","es":"he","de":"he","it":"he"},"translate_blocked_languages":["he","iw"],"browser":{"has_seen_welcome_page":true},"download":{"default_directory":"/home/runner/Downloads","prompt_for_download":false,"directory_upgrade":true}}' \
             > "$HOME/.config/google-chrome/Default/Preferences"
-          # make pcmanfm the default handler for folders so Chrome "show in folder" works
+          sudo mkdir -p /etc/opt/chrome/policies/managed
+          printf '%s' '{"ForcedLanguages":["he","he-IL","en-US","en"],"TranslateEnabled":true}' \
+            | sudo tee /etc/opt/chrome/policies/managed/hebrew.json >/dev/null
+          # default handlers so "show in folder" and opening files work
           xdg-mime default pcmanfm.desktop inode/directory 2>/dev/null || true
+          xdg-mime default org.gnome.Evince.desktop application/pdf 2>/dev/null || true
+          xdg-mime default gpicview.desktop image/png image/jpeg image/gif image/webp 2>/dev/null || true
+          xdg-mime default mousepad.desktop text/plain 2>/dev/null || true
 
-      # NOTE: xpra's default port 14500 is already taken on the runner by a
-      # systemd-activated xpra.socket, so binding it fails ("Address already in
-      # use") and the whole server dies -> Cloudflare shows 502. We bind 41234.
-      #
-      # Google Chrome is preinstalled on the runner. The apt "chromium-browser"
-      # package is a snap, and snap confinement breaks the PulseAudio connection
-      # under xpra (= no sound), so we use Chrome instead.
-      #
-      # file-transfer/open-files/open-url = on  -> the html5 client's Server menu
-      # can send files to your computer and receive uploads. pcmanfm is launched
-      # via --start (not start-child, so closing it doesn't end the session) to
-      # give a real file manager for the Downloads folder.
+      # xpra default port 14500 is taken on the runner by a systemd socket -> bind
+      # fails -> Cloudflare 502. We bind 41234.
+      # --resize-display pins a sane screen (default is a huge 8192x4096 root).
+      # --keyboard-sync=no: better over the high-latency tunnel.
+      # file-transfer/open-files/open-url on -> the html5 Server menu can move
+      # files to/from your computer; pcmanfm gives a real file manager.
       - name: Start Xpra
         run: |
           export LANG=he_IL.UTF-8
-          export LANGUAGE=he_IL:he
+          export LANGUAGE=he:he_IL:en
+          export LC_MESSAGES=he_IL.UTF-8
           mkdir -p "$HOME/Downloads"
 
           xpra start :100 \
@@ -69,6 +77,7 @@ jobs:
             --html=on \
             --daemon=yes \
             --exit-with-children=yes \
+            --resize-display=1280x720 \
             --pulseaudio=yes \
             --speaker=yes \
             --speaker-codec=mp3 \
@@ -78,6 +87,7 @@ jobs:
             --file-transfer=yes \
             --open-files=yes \
             --open-url=yes \
+            --keyboard-sync=no \
             --webcam=no \
             --mdns=no \
             --notifications=yes \
@@ -89,6 +99,7 @@ jobs:
               --lang=he \
               --no-sandbox \
               --disable-dev-shm-usage \
+              --disable-session-crashed-bubble \
               --disable-sync \
               --disable-background-networking \
               --disable-background-timer-throttling \
@@ -98,17 +109,14 @@ jobs:
               --no-first-run \
               --no-default-browser-check \
               --autoplay-policy=no-user-gesture-required \
-              --renderer-process-limit=2 \
-              --window-size=854,480"
+              --renderer-process-limit=4 \
+              --window-size=1280,720"
 
           # wait until the HTML5 server actually answers
           for i in $(seq 1 30); do
             curl -s -o /dev/null http://localhost:41234 && break
             sleep 2
           done
-
-          # Hebrew keyboard layout with Alt+Shift toggle (English <-> Hebrew)
-          DISPLAY=:100 setxkbmap -layout "us,il" -option "grp:alt_shift_toggle" 2>/dev/null || true
           echo "Xpra is up."
 
       - name: Start Cloudflare Tunnel
@@ -117,7 +125,6 @@ jobs:
             --url http://localhost:41234 \
             > tunnel.log 2>&1 &
 
-          # poll for the URL instead of a fixed sleep
           URL=""
           for i in $(seq 1 30); do
             URL=$(grep -o "https://[-a-zA-Z0-9.]*trycloudflare.com" tunnel.log | head -1)
@@ -131,16 +138,15 @@ jobs:
             exit 1
           fi
 
-          # שמע חד-כיווני בלבד: הרמקול (שרת->דפדפן) עובד. מיקרופון (דפדפן->שרת)
-          # לא נתמך בלקוח ה-HTML5 של xpra. לוח טקסט עובד לשני הכיוונים.
+          # שמע: רמקול (שרת->דפדפן) עובד ב-Chrome. מיקרופון לא נתמך בלקוח html5.
+          # לוח טקסט עובד לשני הכיוונים.
           FULL="${URL}/?sound=on&audio_codec=mp3&clipboard=on"
 
           echo "=============================================================="
-          echo " OPEN THIS URL (speaker audio + clipboard + Hebrew):"
+          echo " OPEN THIS URL (Chrome recommended):"
           echo " ${FULL}"
           echo "=============================================================="
 
-          # נשמר כ-artifact כדי שהסקריפט/EXE יוכל למשוך אותו ב-API בזמן אמת
           echo "${FULL}" > "${GITHUB_WORKSPACE}/tunnel_url.txt"
 
       - name: Publish tunnel URL
