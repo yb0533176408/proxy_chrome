@@ -52,10 +52,24 @@ jobs:
             --url http://localhost:14500 \
             > tunnel.log 2>&1 &
 
-          sleep 10
+          URL=""
+          for i in $(seq 1 60); do
+            URL=$(grep -o "https://[-a-zA-Z0-9.]*trycloudflare.com" tunnel.log | head -1)
+            [ -n "$URL" ] && break
+            sleep 2
+          done
 
-          echo "Tunnel URL:"
-          grep -o "https://[-a-zA-Z0-9.]*trycloudflare.com" tunnel.log || true
+          if [ -z "$URL" ]; then
+            echo "::error title=tunnel::Cloudflare tunnel URL not found"
+            cat tunnel.log
+            exit 1
+          fi
+
+          echo "Tunnel URL: $URL"
+          # ערוץ זמין ב-API בזמן אמת (annotation), בניגוד ללוגים
+          echo "::notice title=TUNNEL_URL::$URL"
+          echo "# Tunnel URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Keep Alive
         run: |
