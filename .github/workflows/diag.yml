@@ -36,20 +36,22 @@ jobs:
           } > env_before.txt 2>&1
           cat env_before.txt
 
-      - name: Start xpra (no exit-with-children, capture everything)
+      - name: Start xpra (daemon=no, backgrounded) + audio both directions
         run: |
-          # start pulseaudio like xpra would need
-          pulseaudio --start --exit-idle-time=-1 2>&1 | tail -5 || true
+          sudo apt-get install -y iproute2 >/dev/null 2>&1 || true
+          echo "===== listeners BEFORE xpra ====="
+          ss -ltnp 2>/dev/null | grep -E ':14500' || echo "14500 free"
 
+          # background instead of --daemon=yes (avoids the double-bind in xpra 6.5)
           xpra start :100 \
             --bind-tcp=0.0.0.0:14500 \
             --html=on \
-            --daemon=yes \
+            --daemon=no \
             --exit-with-children=no \
             --pulseaudio=yes \
             --speaker=yes \
             --speaker-codec=mp3 \
-            --microphone=off \
+            --microphone=yes \
             --clipboard=yes \
             --clipboard-direction=both \
             --webcam=no --mdns=no --notifications=no --bell=no \
@@ -62,9 +64,18 @@ jobs:
               --no-first-run --no-default-browser-check \
               --autoplay-policy=no-user-gesture-required \
               --renderer-process-limit=2 --window-size=854,480" \
-            2>&1 | tail -n 40 || true
+            > xpra_stdout.txt 2>&1 &
+          XPID=$!
+          echo "xpra pid=$XPID"
 
-          sleep 35
+          # wait for HTML5 server to answer
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:14500 && { echo "HTML5 up after ${i}x2s"; break; }
+            sleep 2
+          done
+
+          echo "===== listeners AFTER xpra ====="
+          ss -ltnp 2>/dev/null | grep -E ':14500' || echo "nothing on 14500"
 
       - name: Collect diagnostics (after)
         if: always()
@@ -85,12 +96,15 @@ jobs:
           } > diag_after.txt 2>&1
           cat diag_after.txt
 
-          echo "===== xpra server logs =====" > server_logs.txt
-          echo "which Xvfb Xorg: $(which Xvfb Xorg 2>&1)" >> server_logs.txt
+          echo "===== xpra_stdout.txt =====" > server_logs.txt
+          cat xpra_stdout.txt >> server_logs.txt 2>/dev/null || true
+          echo "===== xpra server.log =====" >> server_logs.txt
           for f in $(find /run/user ~/.xpra -name '*.log' 2>/dev/null); do
             echo "----- $f -----" >> server_logs.txt
             cat "$f" >> server_logs.txt
           done
+          echo "===== speaker/mic in xpra info =====" >> server_logs.txt
+          xpra info :100 2>/dev/null | grep -Ei 'speaker|microphone|sound|audio' | head -40 >> server_logs.txt || true
           cat server_logs.txt || true
 
       - name: Upload diagnostics
