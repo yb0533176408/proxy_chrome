@@ -86,13 +86,12 @@ jobs:
           cat diag_after.txt
 
           echo "===== xpra server logs =====" > server_logs.txt
-          for f in ~/.xpra/*.log /run/user/*/xpra/*.log; do
-            if [ -f "$f" ]; then
-              echo "----- $f -----" >> server_logs.txt
-              cat "$f" >> server_logs.txt
-            fi
+          echo "which Xvfb Xorg: $(which Xvfb Xorg 2>&1)" >> server_logs.txt
+          for f in $(find /run/user ~/.xpra -name '*.log' 2>/dev/null); do
+            echo "----- $f -----" >> server_logs.txt
+            cat "$f" >> server_logs.txt
           done
-          tail -n 60 server_logs.txt || true
+          cat server_logs.txt || true
 
       - name: Upload diagnostics
         if: always()
