@@ -30,20 +30,24 @@ jobs:
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb
 
+      # NOTE: xpra's default port 14500 is already taken on the runner by a
+      # systemd-activated xpra.socket, so binding it fails ("Address already in
+      # use") and the whole server dies -> Cloudflare shows 502. We bind 41234.
+      #
       # Google Chrome is preinstalled on the runner. The apt "chromium-browser"
       # package is a snap, and snap confinement breaks the PulseAudio connection
       # under xpra (= no sound), so we use Chrome instead.
       - name: Start Xpra
         run: |
           xpra start :100 \
-            --bind-tcp=0.0.0.0:14500 \
+            --bind-tcp=0.0.0.0:41234 \
             --html=on \
             --daemon=yes \
             --exit-with-children=yes \
             --pulseaudio=yes \
             --speaker=yes \
             --speaker-codec=mp3 \
-            --microphone=off \
+            --microphone=yes \
             --clipboard=yes \
             --clipboard-direction=both \
             --webcam=no \
@@ -70,7 +74,7 @@ jobs:
 
           # wait until the HTML5 server actually answers
           for i in $(seq 1 30); do
-            curl -s -o /dev/null http://localhost:14500 && break
+            curl -s -o /dev/null http://localhost:41234 && break
             sleep 2
           done
           echo "Xpra is up."
@@ -78,7 +82,7 @@ jobs:
       - name: Start Cloudflare Tunnel
         run: |
           cloudflared tunnel --no-autoupdate \
-            --url http://localhost:14500 \
+            --url http://localhost:41234 \
             > tunnel.log 2>&1 &
 
           # poll for the URL instead of a fixed sleep
@@ -95,11 +99,11 @@ jobs:
             exit 1
           fi
 
-          # ה-URL הסופי כולל פרמטרים לאודיו + לוח
-          FULL="${URL}/?sound=on&audio_codec=mp3&clipboard=on"
+          # ה-URL הסופי כולל פרמטרים לאודיו (רמקול) + מיקרופון + לוח
+          FULL="${URL}/?sound=on&audio_codec=mp3&microphone=on&clipboard=on"
 
           echo "=============================================================="
-          echo " OPEN THIS URL (audio + clipboard enabled):"
+          echo " OPEN THIS URL (audio both ways + clipboard enabled):"
           echo " ${FULL}"
           echo "=============================================================="
 
