@@ -47,7 +47,7 @@ jobs:
             --pulseaudio=yes \
             --speaker=yes \
             --speaker-codec=mp3 \
-            --microphone=yes \
+            --microphone=no \
             --clipboard=yes \
             --clipboard-direction=both \
             --webcam=no \
@@ -99,11 +99,13 @@ jobs:
             exit 1
           fi
 
-          # ה-URL הסופי כולל פרמטרים לאודיו (רמקול) + מיקרופון + לוח
-          FULL="${URL}/?sound=on&audio_codec=mp3&microphone=on&clipboard=on"
+          # שמע חד-כיווני בלבד: הרמקול (שרת->דפדפן) עובד. מיקרופון (דפדפן->שרת)
+          # לא נתמך בלקוח ה-HTML5 של xpra - אין בו קוד ללכידת מיקרופון. לוח טקסט
+          # עובד לשני הכיוונים (העתקת תמונות לא נתמכת בדפדפן).
+          FULL="${URL}/?sound=on&audio_codec=mp3&clipboard=on"
 
           echo "=============================================================="
-          echo " OPEN THIS URL (audio both ways + clipboard enabled):"
+          echo " OPEN THIS URL (speaker audio + clipboard):"
           echo " ${FULL}"
           echo "=============================================================="
 
