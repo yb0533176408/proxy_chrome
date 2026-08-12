@@ -66,10 +66,16 @@ jobs:
           fi
 
           echo "Tunnel URL: $URL"
-          # ערוץ זמין ב-API בזמן אמת (annotation), בניגוד ללוגים
-          echo "::notice title=TUNNEL_URL::$URL"
-          echo "# Tunnel URL" >> "$GITHUB_STEP_SUMMARY"
-          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" > "${GITHUB_WORKSPACE}/tunnel_url.txt"
+
+      # artifact זמין ב-API מיד אחרי ההעלאה, בעוד ה-job ממשיך לרוץ.
+      # זה הערוץ היחיד שבאמת מתעדכן בזמן אמת (annotations/logs זמינים רק בסיום).
+      - name: Publish tunnel URL
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnel-url
+          path: tunnel_url.txt
+          retention-days: 1
 
       - name: Keep Alive
         run: |
