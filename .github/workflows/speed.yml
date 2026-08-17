@@ -1,0 +1,31 @@
+name: DIAG speed
+on:
+  workflow_dispatch:
+jobs:
+  speed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Runner download speed (real files)
+        run: |
+          {
+            echo "===== egress geo ====="
+            curl -s https://ipinfo.io/json | tr -d '\n'; echo
+            echo "===== DOWNLOAD Hetzner 100MB ====="
+            curl -s -o /dev/null -w "time=%{time_total}s speed=%{speed_download} B/s http=%{http_code}\n" \
+              https://ash-speed.hetzner.com/100MB.bin || echo "hetzner failed"
+            echo "===== DOWNLOAD Cachefly 100MB ====="
+            curl -s -o /dev/null -w "time=%{time_total}s speed=%{speed_download} B/s http=%{http_code}\n" \
+              https://cachefly.cachefly.net/100mb.test || echo "cachefly failed"
+            echo "===== DOWNLOAD GitHub release (cloudflared ~40MB) ====="
+            curl -sL -o /dev/null -w "time=%{time_total}s speed=%{speed_download} B/s http=%{http_code}\n" \
+              https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb || echo "gh failed"
+          } > speed.txt 2>&1
+          cat speed.txt
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speed
+          path: speed.txt
+          retention-days: 1
