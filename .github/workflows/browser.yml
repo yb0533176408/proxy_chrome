@@ -31,7 +31,12 @@ jobs:
           sudo locale-gen he_IL.UTF-8 || true
           sudo update-mime-database /usr/share/mime 2>/dev/null || true
           sudo update-desktop-database 2>/dev/null || true
-          sudo npm install -g localtunnel
+
+      - name: Install localtunnel
+        run: |
+          npm install -g localtunnel 2>&1 | tail -3 \
+            || sudo npm install -g localtunnel 2>&1 | tail -3
+          command -v lt && lt --version || true
 
       # Chrome: Hebrew UI + AUTOMATIC translate of non-Hebrew pages -> Hebrew.
       - name: Configure Chrome (Hebrew UI + auto-translate + downloads)
